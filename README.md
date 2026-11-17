@@ -14,7 +14,8 @@
 ├── frontend/                 React + Vite + TypeScript 前端（唯一运行单元）
 │   ├── src/views/            每个业务模块一个页面
 │   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出
-│   ├── src/data/             模块元数据 / 示例数据 / localStorage 持久化
+│   ├── src/api/reprocess-service.ts 字段映射增量重算：差异、清单、核验、落盘、恢复
+│   ├── src/data/             模块元数据 / 示例数据 / 增量重算状态 / localStorage 持久化
 │   ├── src/stores/           会话与筛选状态
 │   └── vite.config.ts        dev server 配置（open: false，无 /api 代理）
 ├── .gitignore
@@ -60,6 +61,32 @@ npm run build
 | 数据分发 | `export` | 分发通道 | 通道编号、输出数据集、目标系统 |
 | RPA流程 | `rpaflow` | 自动化流程 | 流程编号、目标页面、操作序列 |
 | 登录凭证 | `auth` | 凭证配置 | 凭证编号、目标站点、认证方式 |
+
+## 字段映射增量重算
+
+字段映射改一个目标字段不再重跑全部源记录。相关实现：
+
+- `frontend/src/data/reprocess-seed.ts`：映射版本（V1 完整版 / V2 当前草稿）、源记录、上一版转换结果、
+  按目标字段的版本差异计算、成本对比。
+- `frontend/src/api/reprocess-service.ts`：生成/刷新增量重算清单、冲突判定、核验、数据落盘、
+  中断恢复、复核状态与检索定位。
+- `frontend/src/views/extractor/`：字段映射页（增量重算清单 / 差异与冲突判定 / 映射规则）。
+- `frontend/src/views/storage/StorageView.tsx`：数据落盘页（写回队列 / 落盘配置），
+  按清单替换受影响目标字段，其他列继续引用上一版完整结果。
+
+操作口径：
+
+1. 「按目标字段合并差异后重算」读取新旧映射版本和上一版完整结果，只重算差异字段，生成
+   字段映射增量重算清单；同一版本重复执行复用原清单，不会再次列出一批相同记录。
+2. 「核验清单」确认未变化目标字段保持原结果、必填标识已处理、受影响记录可定位；未核验不能落盘。
+3. 「按清单替换受影响目标字段」整批一次提交：任一条失败则整批回滚，不会只写一部分目标字段。
+   落盘页可注入落盘故障或数据质量演练验证这两条边界。
+4. 「中断后立即恢复」从最后完整版本续做剩余清单记录；只有全部清单记录写入后才推进完整版本。
+5. 同一目标字段同时改类型转换与清洗表达式时，按字段级或整行重算的写入范围不同，需在
+   「差异与冲突判定」里记录落库做法与复核依据。
+
+数据保存在 `scraper-strategy-studio:reprocess`（增量重算状态）与
+`scraper-strategy-studio:entries`（各模块登记数据）两项 localStorage 中。
 
 ## 约定
 
